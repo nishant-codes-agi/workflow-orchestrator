@@ -1,7 +1,47 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { BoundedSemaphore } from '../../../src/data-structures/bounded-semaphore.js';
 
 describe('BoundedSemaphore', () => {
+  it('trace: console.log acquire/release during concurrent test, confirm max 3 in parallel', async () => {
+    const logSpy = vi.spyOn(console, 'log');
+    const sem = new BoundedSemaphore(3);
+    let running = 0;
+    let maxRunning = 0;
+
+    const tasks = Array.from({ length: 10 }, async (_, i) => {
+      await sem.acquire();
+      running++;
+      console.log(`ACQUIRE task-${i}: running=${running}, permits=${sem.availablePermits()}`);
+      if (running > maxRunning) maxRunning = running;
+      // assert invariant on every acquire
+      expect(running).toBeLessThanOrEqual(3);
+      await new Promise((r) => setTimeout(r, Math.random() * 20));
+      running--;
+      sem.release();
+      console.log(`RELEASE task-${i}: running=${running}, permits=${sem.availablePermits()}`);
+    });
+
+    await Promise.all(tasks);
+
+    expect(maxRunning).toBeLessThanOrEqual(3);
+    expect(sem.availablePermits()).toBe(3);
+
+    // Verify acquire/release logs were emitted
+    const logCalls = logSpy.mock.calls.map(c => c[0] as string);
+    const acquireLogs = logCalls.filter(msg => msg.startsWith('ACQUIRE'));
+    const releaseLogs = logCalls.filter(msg => msg.startsWith('RELEASE'));
+    expect(acquireLogs.length).toBe(10);
+    expect(releaseLogs.length).toBe(10);
+
+    // Verify no logged running count exceeds 3
+    for (const msg of acquireLogs) {
+      const match = msg.match(/running=(\d+)/);
+      expect(Number(match![1])).toBeLessThanOrEqual(3);
+    }
+
+    logSpy.mockRestore();
+  });
+
   it('acquire 3 times immediately, 4th blocks until release', async () => {
     const sem = new BoundedSemaphore(3);
 
