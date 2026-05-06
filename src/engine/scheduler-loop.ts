@@ -40,13 +40,18 @@ export class SchedulerLoop {
         this.heapTaskIds.add(task.id);
       }
     }
-    this.logger.info({ count: tasks.length }, 'Loaded READY tasks into heap');
+    if (tasks.length > 0) {
+      this.logger.info({ count: tasks.length }, 'Loaded READY tasks into heap');
+    }
   }
 
   async pollPendingRetries(): Promise<void> {
     const tasks = await this.taskRepo.getReadyTasksWithSchedule();
     for (const task of tasks) {
       if (!this.heapTaskIds.has(task.id)) {
+        // Transition PENDING → READY so claimTask CAS guard succeeds
+        await this.taskRepo.markTaskReady(this.db, task.id);
+
         this.heap.insert({
           taskId: task.id,
           priority: task.priority,
@@ -61,6 +66,9 @@ export class SchedulerLoop {
   private async tick(): Promise<void> {
     if (!this.workerPool) return;
 
+    // Pick up newly submitted READY tasks
+    await this.loadReadyTasks();
+    // Pick up retried PENDING tasks whose scheduled_at has arrived
     await this.pollPendingRetries();
 
     while (this.heap.size() > 0 && this.workerPool.availablePermits() > 0) {

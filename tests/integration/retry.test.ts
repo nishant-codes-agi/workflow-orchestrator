@@ -190,4 +190,115 @@ describe('Retry integration', () => {
     expect(taskResult.rows[0]!.status).toBe('FAILED');
     expect(taskResult.rows[0]!.attempts).toBe(1);
   });
+
+  it('confirm backoff values in DB: attempts, last_sleep_ms, scheduled_at', async (ctx) => {
+    if (!dbAvailable) ctx.skip();
+
+    const handlerRegistry = new HandlerRegistry();
+    handlerRegistry.register('noop', async () => {});
+    handlerRegistry.register('fail-n-times', async (input, ctx) => {
+      const n = (input as { failCount?: number })?.failCount ?? 1;
+      if (ctx.attempt <= n) throw new Error(`intentional failure on attempt ${ctx.attempt}`);
+    });
+
+    await setupEngine(handlerRegistry);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/workflows',
+      payload: {
+        tasks: [
+          {
+            id: 'A',
+            handler: 'fail-n-times',
+            input: { failCount: 1 },
+            retryPolicy: { maxAttempts: 3, backoffBase: 100, backoffCap: 5000 },
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const { workflowId } = JSON.parse(response.body);
+
+    const finalStatus = await waitForWorkflowTerminal(workflowId);
+    expect(finalStatus).toBe('COMPLETED');
+
+    // Query DB for backoff-related columns
+    const taskResult = await pool.query<{
+      attempts: number;
+      last_sleep_ms: number;
+      scheduled_at: Date;
+      status: string;
+    }>(
+      `SELECT attempts, last_sleep_ms, scheduled_at FROM tasks WHERE workflow_id = $1`,
+      [workflowId],
+    );
+
+    const task = taskResult.rows[0]!;
+
+    // Task failed once and succeeded on attempt 2
+    expect(task.attempts).toBe(2);
+
+    // After the first failure, backoff should have been applied
+    // last_sleep_ms should be >= backoffBase (100) and <= backoffCap (5000)
+    expect(task.last_sleep_ms).toBeGreaterThanOrEqual(100);
+    expect(task.last_sleep_ms).toBeLessThanOrEqual(5000);
+
+    // scheduled_at should be a valid timestamp
+    expect(task.scheduled_at).toBeInstanceOf(Date);
+  });
+
+  it('submit with timeoutMs=100 and slow handler (5s): workflow fails due to timeout', async (ctx) => {
+    if (!dbAvailable) ctx.skip();
+
+    const handlerRegistry = new HandlerRegistry();
+    handlerRegistry.register('noop', async () => {});
+    handlerRegistry.register('slow', async (input, ctx) => {
+      const ms = (input as { ms?: number })?.ms ?? 1000;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        ctx.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new Error('aborted'));
+        });
+      });
+    });
+
+    await setupEngine(handlerRegistry);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/workflows',
+      payload: {
+        tasks: [
+          {
+            id: 'A',
+            handler: 'slow',
+            input: { ms: 5000 },
+            timeoutMs: 100,
+            retryPolicy: { maxAttempts: 1, backoffBase: 100, backoffCap: 500 },
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const { workflowId } = JSON.parse(response.body);
+
+    const finalStatus = await waitForWorkflowTerminal(workflowId);
+    expect(finalStatus).toBe('FAILED');
+
+    const taskResult = await pool.query<{ status: string; error: string | null; attempts: number }>(
+      `SELECT status, error, attempts FROM tasks WHERE workflow_id = $1`,
+      [workflowId],
+    );
+
+    const task = taskResult.rows[0]!;
+    expect(task.status).toBe('FAILED');
+    expect(task.attempts).toBe(1);
+    // The error should indicate a timeout occurred
+    expect(task.error).toBeDefined();
+    expect(task.error!.toLowerCase()).toMatch(/timeout|abort/);
+  });
 });

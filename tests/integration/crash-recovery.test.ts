@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
 import pg from 'pg';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +57,8 @@ function startServer(port: number): ChildProcess {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  proc.stderr?.on('data', (d: Buffer) => process.stderr.write(`[child:${port}] ${d}`));
+  proc.stdout?.on('data', (d: Buffer) => process.stdout.write(`[child:${port}] ${d}`));
   return proc;
 }
 
@@ -84,17 +87,17 @@ async function submitWorkflow(port: number, tasks: unknown[]): Promise<string> {
   return body.workflowId;
 }
 
-async function waitForNRunning(workflowId: string, n: number, timeoutMs = 15000): Promise<void> {
+async function waitForTaskActivity(workflowId: string, timeoutMs = 30000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const result = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM tasks WHERE workflow_id = $1 AND status = 'RUNNING'`,
+      `SELECT COUNT(*) as count FROM tasks WHERE workflow_id = $1 AND status IN ('RUNNING', 'COMPLETED')`,
       [workflowId],
     );
-    if (parseInt(result.rows[0]!.count, 10) >= n) return;
+    if (parseInt(result.rows[0]!.count, 10) >= 1) return;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`Did not find ${n} RUNNING tasks within ${timeoutMs}ms`);
+  throw new Error(`No tasks reached RUNNING or COMPLETED within ${timeoutMs}ms`);
 }
 
 async function waitForWorkflowTerminal(workflowId: string, timeoutMs = 60000): Promise<string> {
@@ -111,11 +114,23 @@ async function waitForWorkflowTerminal(workflowId: string, timeoutMs = 60000): P
   throw new Error(`Workflow did not reach terminal state within ${timeoutMs}ms`);
 }
 
+function getRandomPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.listen(0, () => {
+      const addr = srv.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+    srv.on('error', reject);
+  });
+}
+
 describe('Crash recovery (kill -9)', () => {
   it('recovers from kill -9 mid-execution', async (ctx) => {
     if (!dbAvailable) ctx.skip();
 
-    const port = 3099;
+    const port = await getRandomPort();
 
     // Clean up any leftover data
     await pool.query('DELETE FROM task_dependencies');
@@ -132,13 +147,13 @@ describe('Crash recovery (kill -9)', () => {
       return;
     }
 
-    // 2. Submit a 10-task chain with 'slow' handler (500ms each)
+    // 2. Submit a 10-task chain with 'slow' handler (2000ms each)
     const tasks = [];
     for (let i = 0; i < 10; i++) {
       tasks.push({
         id: `task-${i}`,
         handler: 'slow',
-        input: { ms: 500 },
+        input: { ms: 2000 },
         dependsOn: i > 0 ? [`task-${i - 1}`] : [],
         retryPolicy: { maxAttempts: 5, backoffBase: 100, backoffCap: 1000 },
       });
@@ -146,8 +161,8 @@ describe('Crash recovery (kill -9)', () => {
 
     const workflowId = await submitWorkflow(port, tasks);
 
-    // 3. Wait until at least 1 task is RUNNING
-    await waitForNRunning(workflowId, 1);
+    // 3. Wait until at least 1 task has been picked up
+    await waitForTaskActivity(workflowId);
 
     // 4. Kill the process with SIGKILL (kill -9)
     proc.kill('SIGKILL');

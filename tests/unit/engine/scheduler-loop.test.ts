@@ -55,6 +55,7 @@ describe('SchedulerLoop', () => {
     mockTaskRepo = {
       getReadyTasks: vi.fn().mockResolvedValue([]),
       getReadyTasksWithSchedule: vi.fn().mockResolvedValue([]),
+      markTaskReady: vi.fn().mockResolvedValue(undefined),
     } as unknown as TaskRepository;
     mockWorkerPool = {
       executeTask: vi.fn().mockResolvedValue(undefined),

@@ -150,8 +150,8 @@ export class TaskRepository {
   ): Promise<void> {
     await pool.query(
       `UPDATE tasks SET status = 'PENDING',
-       scheduled_at = NOW() + ($2 || ' milliseconds')::interval,
-       last_sleep_ms = $2
+       scheduled_at = NOW() + ($2::int * interval '1 millisecond'),
+       last_sleep_ms = $2::int
        WHERE id = $1`,
       [taskId, sleepMs],
     );
@@ -246,15 +246,14 @@ export class TaskRepository {
         scheduled_at = CASE
           WHEN attempts >= max_attempts THEN NOW()
           ELSE NOW() + (LEAST(backoff_cap_ms,
-            FLOOR(random() * (last_sleep_ms * 3 - backoff_base_ms)
-            + backoff_base_ms))
-            || ' milliseconds')::interval
+            FLOOR(random() * (GREATEST(last_sleep_ms, backoff_base_ms) * 3 - backoff_base_ms)
+            + backoff_base_ms))::int * interval '1 millisecond')
         END,
         last_sleep_ms = CASE
           WHEN attempts >= max_attempts THEN last_sleep_ms
           ELSE LEAST(backoff_cap_ms,
-            FLOOR(random() * (last_sleep_ms * 3 - backoff_base_ms)
-            + backoff_base_ms))
+            FLOOR(random() * (GREATEST(last_sleep_ms, backoff_base_ms) * 3 - backoff_base_ms)
+            + backoff_base_ms))::int
         END,
         completed_at = CASE
           WHEN attempts >= max_attempts THEN NOW()
@@ -265,7 +264,7 @@ export class TaskRepository {
           ELSE error
         END
         WHERE status = 'RUNNING'
-        AND last_heartbeat_at < NOW() - ($1 || ' milliseconds')::interval
+        AND last_heartbeat_at < NOW() - ($1::int * interval '1 millisecond')
         RETURNING *
       )
       SELECT id, workflow_id, status, pending_deps, priority, scheduled_at,
