@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WorkerPool } from '../../../src/engine/worker-pool.js';
 import { HandlerRegistry } from '../../../src/engine/handler-registry.js';
 import type { TaskRepository } from '../../../src/repositories/task.repository.js';
+import type { WorkflowRepository } from '../../../src/repositories/workflow.repository.js';
 import type { TaskCompleter } from '../../../src/engine/task-completer.js';
 import type { Config } from '../../../src/config.js';
 import type pg from 'pg';
@@ -63,6 +64,7 @@ function mockTaskRow(overrides: Partial<{
 describe('Timeout enforcement', () => {
   let registry: HandlerRegistry;
   let mockTaskRepo: TaskRepository;
+  let mockWorkflowRepo: WorkflowRepository;
   let mockTaskCompleter: TaskCompleter;
   let mockPool: pg.Pool;
 
@@ -77,6 +79,10 @@ describe('Timeout enforcement', () => {
       markCompleted: vi.fn().mockResolvedValue(undefined),
       markFailed: vi.fn().mockResolvedValue(undefined),
     } as unknown as TaskRepository;
+
+    mockWorkflowRepo = {
+      getStatus: vi.fn().mockResolvedValue('RUNNING'),
+    } as unknown as WorkflowRepository;
 
     mockTaskCompleter = {
       persistOutcome: vi.fn().mockResolvedValue(undefined),
@@ -98,6 +104,7 @@ describe('Timeout enforcement', () => {
     const workerPool = new WorkerPool(
       registry,
       mockTaskRepo,
+      mockWorkflowRepo,
       mockTaskCompleter,
       mockPool,
       defaultConfig,
@@ -135,6 +142,7 @@ describe('Timeout enforcement', () => {
     const workerPool = new WorkerPool(
       registry,
       mockTaskRepo,
+      mockWorkflowRepo,
       mockTaskCompleter,
       mockPool,
       defaultConfig,
@@ -174,6 +182,7 @@ describe('Timeout enforcement', () => {
     const workerPool = new WorkerPool(
       registry,
       mockTaskRepo,
+      mockWorkflowRepo,
       mockTaskCompleter,
       mockPool,
       defaultConfig,

@@ -9,6 +9,7 @@ import { SchedulerLoop } from './engine/scheduler-loop.js';
 import { WorkerPool } from './engine/worker-pool.js';
 import { TaskCompleter } from './engine/task-completer.js';
 import { Reaper } from './engine/reaper.js';
+import { CronScheduler } from './cron/cron-scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,7 +44,7 @@ async function main() {
     if (ctx.attempt <= n) throw new Error(`intentional failure on attempt ${ctx.attempt}`);
   });
 
-  const { server, workflowRepo, taskRepo } = await buildServer(
+  const { server, workflowRepo, taskRepo, workflowService, scheduleRepo } = await buildServer(
     pool,
     config,
     handlerRegistry,
@@ -67,6 +68,7 @@ async function main() {
   const workerPool = new WorkerPool(
     handlerRegistry,
     taskRepo,
+    workflowRepo,
     taskCompleter,
     pool,
     config,
@@ -84,6 +86,14 @@ async function main() {
     server.log,
   );
 
+  const cronScheduler = new CronScheduler(
+    pool,
+    scheduleRepo,
+    workflowService,
+    server.log,
+    config.cronTickMs,
+  );
+
   // Startup recovery sequence:
   // 1. Reclaim stale RUNNING tasks
   await reaper.reclaimStaleTasks();
@@ -93,11 +103,14 @@ async function main() {
   schedulerLoop.start();
   // 4. Start reaper polling
   reaper.startPolling();
+  // 5. Start cron scheduler
+  cronScheduler.startPolling();
 
   await server.listen({ port: config.port, host: '0.0.0.0' });
 
   const shutdown = async () => {
     server.log.info('Shutting down...');
+    cronScheduler.stop();
     reaper.stop();
     schedulerLoop.stop();
     await server.close();

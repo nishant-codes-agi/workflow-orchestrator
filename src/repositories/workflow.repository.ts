@@ -33,4 +33,12 @@ export class WorkflowRepository {
       [status, workflowId],
     );
   }
+
+  async getStatus(workflowId: string): Promise<WorkflowStatus | null> {
+    const result = await this.pool.query<{ status: WorkflowStatus }>(
+      `SELECT status FROM workflows WHERE id = $1`,
+      [workflowId],
+    );
+    return result.rows[0]?.status ?? null;
+  }
 }

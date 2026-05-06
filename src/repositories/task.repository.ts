@@ -283,4 +283,38 @@ export class TaskRepository {
     );
     return parseInt(result.rows[0]!.count, 10) > 0;
   }
+
+  async cancelNonStartedTasks(
+    pool: pg.Pool,
+    workflowId: string,
+  ): Promise<number> {
+    const result = await pool.query(
+      `UPDATE tasks SET status = 'CANCELLED', completed_at = NOW()
+       WHERE workflow_id = $1 AND status IN ('PENDING', 'READY')`,
+      [workflowId],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  async markTaskCancelled(pool: pg.Pool, taskId: string): Promise<void> {
+    await pool.query(
+      `UPDATE tasks SET status = 'CANCELLED', completed_at = NOW() WHERE id = $1`,
+      [taskId],
+    );
+  }
+
+  async cancelDependentsOfTask(
+    pool: pg.Pool,
+    workflowId: string,
+    taskId: string,
+  ): Promise<void> {
+    const childIds = await this.getChildTaskIds(pool, taskId);
+    for (const childId of childIds) {
+      await pool.query(
+        `UPDATE tasks SET status = 'CANCELLED', completed_at = NOW()
+         WHERE id = $1 AND status IN ('PENDING', 'READY')`,
+        [childId],
+      );
+    }
+  }
 }

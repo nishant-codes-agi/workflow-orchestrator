@@ -55,4 +55,23 @@ export function registerWorkflowRoutes(
       }
     },
   );
+
+  server.get<{ Params: { id: string } }>(
+    '/workflows/:id',
+    async (request, reply) => {
+      const workflow = await workflowService.getWorkflow(request.params.id);
+      if (!workflow) {
+        return reply.status(404).send({ error: 'Workflow not found' });
+      }
+      return reply.send(workflow);
+    },
+  );
+
+  server.post<{ Params: { id: string } }>(
+    '/workflows/:id/cancel',
+    async (request, reply) => {
+      const result = await workflowService.cancelWorkflow(request.params.id);
+      return reply.status(result.statusCode).send(result.body);
+    },
+  );
 }

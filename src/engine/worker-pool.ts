@@ -1,6 +1,7 @@
 import type { DbPool } from '../db/pool.js';
 import type { Config } from '../config.js';
 import type { TaskRepository } from '../repositories/task.repository.js';
+import type { WorkflowRepository } from '../repositories/workflow.repository.js';
 import type { HandlerRegistry } from './handler-registry.js';
 import type { TaskCompleter } from './task-completer.js';
 import type { TaskHeapEntry } from '../data-structures/min-heap.js';
@@ -13,6 +14,7 @@ export class WorkerPool {
   constructor(
     private readonly handlerRegistry: HandlerRegistry,
     private readonly taskRepo: TaskRepository,
+    private readonly workflowRepo: WorkflowRepository,
     private readonly taskCompleter: TaskCompleter,
     private readonly db: DbPool,
     private readonly config: Config,
@@ -52,6 +54,14 @@ export class WorkerPool {
       const task = taskRows.rows[0];
       if (!task) {
         this.logger.error({ taskId: heapEntry.taskId }, 'Task not found after CAS');
+        return;
+      }
+
+      const workflowStatus = await this.workflowRepo.getStatus(task.workflow_id);
+      if (workflowStatus === 'CANCELLING') {
+        await this.taskRepo.markTaskCancelled(this.db, task.id);
+        this.logger.info({ taskId: task.id }, 'Task cancelled (workflow CANCELLING)');
+        await this.taskCompleter.checkWorkflowTermination(task.workflow_id);
         return;
       }
 

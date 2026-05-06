@@ -27,11 +27,18 @@ export class TaskCompleter {
     outcome: 'completed' | 'failed',
     error?: string,
   ): Promise<void> {
+    const wfStatus = await this.workflowRepo.getStatus(task.workflow_id);
+
     if (outcome === 'completed') {
       await this.taskRepo.markCompleted(this.db, task.id);
       this.logger.info({ taskId: task.id }, 'Task completed');
-      await this.readySetChildren(task.id);
-    } else if (task.attempts < task.max_attempts) {
+
+      if (wfStatus === 'CANCELLING') {
+        await this.cancelDependents(task.id, task.workflow_id);
+      } else {
+        await this.readySetChildren(task.id);
+      }
+    } else if (task.attempts < task.max_attempts && wfStatus !== 'CANCELLING') {
       const sleep = computeNextSleep(
         task.backoff_base_ms ?? 1000,
         task.backoff_cap_ms ?? 30000,
@@ -48,9 +55,18 @@ export class TaskCompleter {
         { taskId: task.id, attempts: task.attempts },
         'Task failed terminally',
       );
+
+      if (wfStatus === 'CANCELLING') {
+        await this.cancelDependents(task.id, task.workflow_id);
+      }
     }
 
     await this.checkWorkflowCompletion(task.workflow_id);
+  }
+
+  private async cancelDependents(taskId: string, workflowId: string): Promise<void> {
+    await this.taskRepo.cancelDependentsOfTask(this.db, workflowId, taskId);
+    this.logger.info({ taskId, workflowId }, 'Cancelled dependents (workflow CANCELLING)');
   }
 
   private async readySetChildren(completedTaskId: string): Promise<void> {
@@ -81,10 +97,20 @@ export class TaskCompleter {
     );
 
     if (nonTerminalCount === 0) {
-      const hasFailed = await this.taskRepo.hasFailedTasks(this.db, workflowId);
-      const finalStatus = hasFailed ? 'FAILED' : 'COMPLETED';
-      await this.workflowRepo.updateStatus(this.db, workflowId, finalStatus);
-      this.logger.info({ workflowId, status: finalStatus }, 'Workflow reached terminal state');
+      const wfStatus = await this.workflowRepo.getStatus(workflowId);
+      if (wfStatus === 'CANCELLING') {
+        await this.workflowRepo.updateStatus(this.db, workflowId, 'CANCELLED');
+        this.logger.info({ workflowId }, 'Workflow cancelled (all tasks drained)');
+      } else {
+        const hasFailed = await this.taskRepo.hasFailedTasks(this.db, workflowId);
+        const finalStatus = hasFailed ? 'FAILED' : 'COMPLETED';
+        await this.workflowRepo.updateStatus(this.db, workflowId, finalStatus);
+        this.logger.info({ workflowId, status: finalStatus }, 'Workflow reached terminal state');
+      }
     }
+  }
+
+  async checkWorkflowTermination(workflowId: string): Promise<void> {
+    await this.checkWorkflowCompletion(workflowId);
   }
 }
