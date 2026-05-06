@@ -8,6 +8,7 @@ import { HandlerRegistry } from './engine/handler-registry.js';
 import { SchedulerLoop } from './engine/scheduler-loop.js';
 import { WorkerPool } from './engine/worker-pool.js';
 import { TaskCompleter } from './engine/task-completer.js';
+import { Reaper } from './engine/reaper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,9 +28,19 @@ async function main() {
   handlerRegistry.register('fail-once', async (_input, ctx) => {
     if (ctx.attempt === 1) throw new Error('transient failure');
   });
-  handlerRegistry.register('slow', async (input) => {
+  handlerRegistry.register('slow', async (input, ctx) => {
     const ms = (input as { ms?: number })?.ms ?? 1000;
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, ms);
+      ctx.signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('aborted'));
+      });
+    });
+  });
+  handlerRegistry.register('fail-n-times', async (input, ctx) => {
+    const n = (input as { failCount?: number })?.failCount ?? 1;
+    if (ctx.attempt <= n) throw new Error(`intentional failure on attempt ${ctx.attempt}`);
   });
 
   const { server, workflowRepo, taskRepo } = await buildServer(
@@ -64,13 +75,30 @@ async function main() {
 
   schedulerLoop.setWorkerPool(workerPool);
 
+  const reaper = new Reaper(
+    pool,
+    config,
+    taskRepo,
+    workflowRepo,
+    schedulerLoop.getHeap(),
+    server.log,
+  );
+
+  // Startup recovery sequence:
+  // 1. Reclaim stale RUNNING tasks
+  await reaper.reclaimStaleTasks();
+  // 2. Load all READY tasks into heap
   await schedulerLoop.loadReadyTasks();
+  // 3. Start scheduler loop
   schedulerLoop.start();
+  // 4. Start reaper polling
+  reaper.startPolling();
 
   await server.listen({ port: config.port, host: '0.0.0.0' });
 
   const shutdown = async () => {
     server.log.info('Shutting down...');
+    reaper.stop();
     schedulerLoop.stop();
     await server.close();
     await pool.end();

@@ -3,6 +3,7 @@ import type { TaskRepository } from '../repositories/task.repository.js';
 import type { WorkflowRepository } from '../repositories/workflow.repository.js';
 import type { MinHeap, TaskHeapEntry } from '../data-structures/min-heap.js';
 import type { FastifyBaseLogger } from 'fastify';
+import { computeNextSleep } from './backoff.js';
 
 export class TaskCompleter {
   constructor(
@@ -14,7 +15,15 @@ export class TaskCompleter {
   ) {}
 
   async persistOutcome(
-    task: { id: string; workflow_id: string; max_attempts: number; attempts: number },
+    task: {
+      id: string;
+      workflow_id: string;
+      max_attempts: number;
+      attempts: number;
+      backoff_base_ms?: number;
+      backoff_cap_ms?: number;
+      last_sleep_ms?: number;
+    },
     outcome: 'completed' | 'failed',
     error?: string,
   ): Promise<void> {
@@ -22,20 +31,23 @@ export class TaskCompleter {
       await this.taskRepo.markCompleted(this.db, task.id);
       this.logger.info({ taskId: task.id }, 'Task completed');
       await this.readySetChildren(task.id);
+    } else if (task.attempts < task.max_attempts) {
+      const sleep = computeNextSleep(
+        task.backoff_base_ms ?? 1000,
+        task.backoff_cap_ms ?? 30000,
+        task.last_sleep_ms ?? 0,
+      );
+      await this.taskRepo.scheduleRetry(this.db, task.id, sleep);
+      this.logger.info(
+        { taskId: task.id, attempts: task.attempts, maxAttempts: task.max_attempts, nextSleepMs: sleep },
+        'Task scheduled for retry',
+      );
     } else {
-      if (task.attempts < task.max_attempts) {
-        await this.taskRepo.markFailed(this.db, task.id, error ?? 'unknown');
-        this.logger.info(
-          { taskId: task.id, attempts: task.attempts, maxAttempts: task.max_attempts },
-          'Task failed terminally',
-        );
-      } else {
-        await this.taskRepo.markFailed(this.db, task.id, error ?? 'unknown');
-        this.logger.info(
-          { taskId: task.id, attempts: task.attempts },
-          'Task failed terminally',
-        );
-      }
+      await this.taskRepo.markFailed(this.db, task.id, error ?? 'unknown');
+      this.logger.info(
+        { taskId: task.id, attempts: task.attempts },
+        'Task failed terminally',
+      );
     }
 
     await this.checkWorkflowCompletion(task.workflow_id);

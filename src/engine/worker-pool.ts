@@ -31,9 +31,6 @@ export class WorkerPool {
         return;
       }
 
-      const tasks = await this.taskRepo.getTasksByWorkflowId('');
-      void tasks;
-
       const taskRows = await this.db.query<{
         id: string;
         workflow_id: string;
@@ -43,8 +40,12 @@ export class WorkerPool {
         logical_id: string;
         max_attempts: number;
         attempts: number;
+        backoff_base_ms: number;
+        backoff_cap_ms: number;
+        last_sleep_ms: number;
       }>(
-        `SELECT id, workflow_id, handler_name, input, timeout_ms, logical_id, max_attempts, attempts
+        `SELECT id, workflow_id, handler_name, input, timeout_ms, logical_id,
+                max_attempts, attempts, backoff_base_ms, backoff_cap_ms, last_sleep_ms
          FROM tasks WHERE id = $1`,
         [heapEntry.taskId],
       );
@@ -98,6 +99,9 @@ export class WorkerPool {
           workflow_id: task.workflow_id,
           max_attempts: task.max_attempts,
           attempts: cas.attempts,
+          backoff_base_ms: task.backoff_base_ms,
+          backoff_cap_ms: task.backoff_cap_ms,
+          last_sleep_ms: task.last_sleep_ms,
         },
         outcome,
         error,
