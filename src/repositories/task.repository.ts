@@ -143,6 +143,20 @@ export class TaskRepository {
     );
   }
 
+  async scheduleRetry(
+    pool: pg.Pool,
+    taskId: string,
+    sleepMs: number,
+  ): Promise<void> {
+    await pool.query(
+      `UPDATE tasks SET status = 'PENDING',
+       scheduled_at = NOW() + ($2 || ' milliseconds')::interval,
+       last_sleep_ms = $2
+       WHERE id = $1`,
+      [taskId, sleepMs],
+    );
+  }
+
   async getChildTaskIds(
     pool: pg.Pool,
     completedTaskId: string,
@@ -196,6 +210,70 @@ export class TaskRepository {
       [workflowId],
     );
     return parseInt(result.rows[0]!.count, 10);
+  }
+
+  async reclaimStaleTasks(
+    pool: pg.Pool,
+    leaseTimeoutMs: number,
+  ): Promise<Array<{
+    id: string;
+    workflow_id: string;
+    status: string;
+    pending_deps: number;
+    priority: number;
+    scheduled_at: Date;
+    submission_order: bigint;
+    max_attempts: number;
+    attempts: number;
+  }>> {
+    const result = await pool.query<{
+      id: string;
+      workflow_id: string;
+      status: string;
+      pending_deps: number;
+      priority: number;
+      scheduled_at: Date;
+      submission_order: bigint;
+      max_attempts: number;
+      attempts: number;
+    }>(
+      `WITH reclaimed AS (
+        UPDATE tasks
+        SET status = CASE
+          WHEN attempts >= max_attempts THEN 'FAILED'
+          ELSE 'PENDING'
+        END,
+        scheduled_at = CASE
+          WHEN attempts >= max_attempts THEN NOW()
+          ELSE NOW() + (LEAST(backoff_cap_ms,
+            FLOOR(random() * (last_sleep_ms * 3 - backoff_base_ms)
+            + backoff_base_ms))
+            || ' milliseconds')::interval
+        END,
+        last_sleep_ms = CASE
+          WHEN attempts >= max_attempts THEN last_sleep_ms
+          ELSE LEAST(backoff_cap_ms,
+            FLOOR(random() * (last_sleep_ms * 3 - backoff_base_ms)
+            + backoff_base_ms))
+        END,
+        completed_at = CASE
+          WHEN attempts >= max_attempts THEN NOW()
+          ELSE completed_at
+        END,
+        error = CASE
+          WHEN attempts >= max_attempts THEN 'heartbeat timeout'
+          ELSE error
+        END
+        WHERE status = 'RUNNING'
+        AND last_heartbeat_at < NOW() - ($1 || ' milliseconds')::interval
+        RETURNING *
+      )
+      SELECT id, workflow_id, status, pending_deps, priority, scheduled_at,
+             submission_order, max_attempts, attempts
+      FROM reclaimed`,
+      [leaseTimeoutMs],
+    );
+    return result.rows;
   }
 
   async hasFailedTasks(pool: pg.Pool, workflowId: string): Promise<boolean> {
