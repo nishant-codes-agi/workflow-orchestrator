@@ -6,7 +6,9 @@ import { HandlerRegistry } from './engine/handler-registry.js';
 import { WorkflowRepository } from './repositories/workflow.repository.js';
 import { TaskRepository } from './repositories/task.repository.js';
 import { WorkflowService } from './services/workflow.service.js';
+import { ScheduleRepository } from './repositories/schedule.repository.js';
 import { registerWorkflowRoutes } from './routes/workflow.routes.js';
+import { registerScheduleRoutes } from './routes/schedule.routes.js';
 
 export async function buildServer(
   pool: DbPool,
@@ -38,7 +40,10 @@ export async function buildServer(
     server.log,
   );
 
-  registerWorkflowRoutes(server, workflowService);
+  const scheduleRepo = new ScheduleRepository(pool);
 
-  return { server, workflowRepo, taskRepo, workflowService };
+  registerWorkflowRoutes(server, workflowService);
+  registerScheduleRoutes(server, scheduleRepo);
+
+  return { server, workflowRepo, taskRepo, workflowService, scheduleRepo };
 }

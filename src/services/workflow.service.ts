@@ -115,6 +115,74 @@ export class WorkflowService {
       client.release();
     }
   }
+
+  async getWorkflow(workflowId: string): Promise<{
+    id: string;
+    status: string;
+    createdAt: Date;
+    updatedAt: Date;
+    tasks: Array<{
+      logicalId: string;
+      status: string;
+      handler: string;
+      attempts: number;
+      maxAttempts: number;
+      error: string | null;
+      completedAt: Date | null;
+    }>;
+  } | null> {
+    const workflow = await this.workflowRepo.findById(workflowId);
+    if (!workflow) return null;
+
+    const tasks = await this.taskRepo.getTasksByWorkflowId(workflowId);
+
+    return {
+      id: workflow.id,
+      status: workflow.status,
+      createdAt: workflow.created_at,
+      updatedAt: workflow.updated_at,
+      tasks: tasks.map((t) => ({
+        logicalId: t.logical_id,
+        status: t.status,
+        handler: t.handler_name,
+        attempts: t.attempts,
+        maxAttempts: t.max_attempts,
+        error: t.error,
+        completedAt: t.completed_at,
+      })),
+    };
+  }
+
+  async cancelWorkflow(
+    workflowId: string,
+  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+    const status = await this.workflowRepo.getStatus(workflowId);
+
+    if (!status) {
+      return { statusCode: 404, body: { error: 'Workflow not found' } };
+    }
+
+    if (status === 'COMPLETED' || status === 'FAILED') {
+      return { statusCode: 409, body: { error: 'Workflow already terminal' } };
+    }
+
+    if (status === 'CANCELLED' || status === 'CANCELLING') {
+      return { statusCode: 200, body: { workflowId, status } };
+    }
+
+    await this.workflowRepo.updateStatus(this.db, workflowId, 'CANCELLING');
+    await this.taskRepo.cancelNonStartedTasks(this.db, workflowId);
+
+    const nonTerminal = await this.taskRepo.countNonTerminalTasks(this.db, workflowId);
+    if (nonTerminal === 0) {
+      await this.workflowRepo.updateStatus(this.db, workflowId, 'CANCELLED');
+      this.logger.info({ workflowId }, 'Workflow cancelled (no running tasks)');
+      return { statusCode: 200, body: { workflowId, status: 'CANCELLED' } };
+    }
+
+    this.logger.info({ workflowId }, 'Workflow cancelling (draining running tasks)');
+    return { statusCode: 200, body: { workflowId, status: 'CANCELLING' } };
+  }
 }
 
 export class SubmissionError extends Error {

@@ -43,6 +43,7 @@ describe('Retry state machine', () => {
 
     mockWorkflowRepo = {
       updateStatus: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi.fn().mockResolvedValue('RUNNING'),
     } as unknown as WorkflowRepository;
 
     completer = new TaskCompleter(

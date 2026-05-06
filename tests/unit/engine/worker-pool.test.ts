@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WorkerPool } from '../../../src/engine/worker-pool.js';
 import { HandlerRegistry } from '../../../src/engine/handler-registry.js';
 import type { TaskRepository } from '../../../src/repositories/task.repository.js';
+import type { WorkflowRepository } from '../../../src/repositories/workflow.repository.js';
 import type { TaskCompleter } from '../../../src/engine/task-completer.js';
 import type { Config } from '../../../src/config.js';
 import type pg from 'pg';
@@ -34,6 +35,7 @@ const defaultConfig: Config = {
 describe('WorkerPool', () => {
   let registry: HandlerRegistry;
   let mockTaskRepo: TaskRepository;
+  let mockWorkflowRepo: WorkflowRepository;
   let mockTaskCompleter: TaskCompleter;
   let mockPool: pg.Pool;
   let workerPool: WorkerPool;
@@ -48,10 +50,16 @@ describe('WorkerPool', () => {
       updateHeartbeat: vi.fn().mockResolvedValue(undefined),
       markCompleted: vi.fn().mockResolvedValue(undefined),
       markFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskCancelled: vi.fn().mockResolvedValue(undefined),
     } as unknown as TaskRepository;
+
+    mockWorkflowRepo = {
+      getStatus: vi.fn().mockResolvedValue('RUNNING'),
+    } as unknown as WorkflowRepository;
 
     mockTaskCompleter = {
       persistOutcome: vi.fn().mockResolvedValue(undefined),
+      checkWorkflowTermination: vi.fn().mockResolvedValue(undefined),
     } as unknown as TaskCompleter;
 
     mockPool = {
@@ -73,6 +81,7 @@ describe('WorkerPool', () => {
     workerPool = new WorkerPool(
       registry,
       mockTaskRepo,
+      mockWorkflowRepo,
       mockTaskCompleter,
       mockPool,
       defaultConfig,
@@ -135,6 +144,7 @@ describe('WorkerPool', () => {
     const wp = new WorkerPool(
       registry,
       mockTaskRepo,
+      mockWorkflowRepo,
       mockTaskCompleter,
       mockPool,
       shortConfig,
@@ -190,5 +200,22 @@ describe('WorkerPool', () => {
 
   it('semaphore limits concurrency', () => {
     expect(workerPool.availablePermits()).toBe(3);
+  });
+
+  it('cancelling workflow: task is marked CANCELLED without executing handler', async () => {
+    vi.mocked(mockWorkflowRepo.getStatus).mockResolvedValue('CANCELLING');
+
+    const entry: TaskHeapEntry = {
+      taskId: 'task-1',
+      priority: 0,
+      scheduledAt: Date.now(),
+      submissionOrder: 1n,
+    };
+
+    await workerPool.executeTask(entry);
+
+    expect(mockTaskRepo.markTaskCancelled).toHaveBeenCalledWith(mockPool, 'task-1');
+    expect(mockTaskCompleter.persistOutcome).not.toHaveBeenCalled();
+    expect(mockTaskCompleter.checkWorkflowTermination).toHaveBeenCalledWith('wf-1');
   });
 });
