@@ -81,6 +81,7 @@ async function setupEngine(handlerRegistry: HandlerRegistry) {
   const workerPool = new WorkerPool(
     handlerRegistry,
     built.taskRepo,
+    built.workflowRepo,
     taskCompleter,
     pool,
     config,
