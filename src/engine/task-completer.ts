@@ -1,0 +1,78 @@
+import type { DbPool } from '../db/pool.js';
+import type { TaskRepository } from '../repositories/task.repository.js';
+import type { WorkflowRepository } from '../repositories/workflow.repository.js';
+import type { MinHeap, TaskHeapEntry } from '../data-structures/min-heap.js';
+import type { FastifyBaseLogger } from 'fastify';
+
+export class TaskCompleter {
+  constructor(
+    private readonly db: DbPool,
+    private readonly taskRepo: TaskRepository,
+    private readonly workflowRepo: WorkflowRepository,
+    private readonly heap: MinHeap<TaskHeapEntry>,
+    private readonly logger: FastifyBaseLogger,
+  ) {}
+
+  async persistOutcome(
+    task: { id: string; workflow_id: string; max_attempts: number; attempts: number },
+    outcome: 'completed' | 'failed',
+    error?: string,
+  ): Promise<void> {
+    if (outcome === 'completed') {
+      await this.taskRepo.markCompleted(this.db, task.id);
+      this.logger.info({ taskId: task.id }, 'Task completed');
+      await this.readySetChildren(task.id);
+    } else {
+      if (task.attempts < task.max_attempts) {
+        await this.taskRepo.markFailed(this.db, task.id, error ?? 'unknown');
+        this.logger.info(
+          { taskId: task.id, attempts: task.attempts, maxAttempts: task.max_attempts },
+          'Task failed terminally',
+        );
+      } else {
+        await this.taskRepo.markFailed(this.db, task.id, error ?? 'unknown');
+        this.logger.info(
+          { taskId: task.id, attempts: task.attempts },
+          'Task failed terminally',
+        );
+      }
+    }
+
+    await this.checkWorkflowCompletion(task.workflow_id);
+  }
+
+  private async readySetChildren(completedTaskId: string): Promise<void> {
+    const childIds = await this.taskRepo.getChildTaskIds(this.db, completedTaskId);
+
+    for (const childId of childIds) {
+      const result = await this.taskRepo.decrementPendingDeps(this.db, childId);
+
+      if (result && result.pending_deps === 0) {
+        await this.taskRepo.markTaskReady(this.db, childId);
+
+        this.heap.insert({
+          taskId: result.id,
+          priority: result.priority,
+          scheduledAt: Date.now(),
+          submissionOrder: result.submission_order,
+        });
+
+        this.logger.info({ taskId: childId }, 'Child task became READY');
+      }
+    }
+  }
+
+  private async checkWorkflowCompletion(workflowId: string): Promise<void> {
+    const nonTerminalCount = await this.taskRepo.countNonTerminalTasks(
+      this.db,
+      workflowId,
+    );
+
+    if (nonTerminalCount === 0) {
+      const hasFailed = await this.taskRepo.hasFailedTasks(this.db, workflowId);
+      const finalStatus = hasFailed ? 'FAILED' : 'COMPLETED';
+      await this.workflowRepo.updateStatus(this.db, workflowId, finalStatus);
+      this.logger.info({ workflowId, status: finalStatus }, 'Workflow reached terminal state');
+    }
+  }
+}
