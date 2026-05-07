@@ -34,19 +34,14 @@ export class CronScheduler {
           'Cron schedule fired',
         );
       } catch (err) {
-        this.logger.error(
-          { err, scheduleId: schedule.id },
-          'Cron schedule fire failed',
-        );
+        this.logger.error({ err, scheduleId: schedule.id }, 'Cron schedule fire failed');
       }
     }
   }
 
   startPolling(): void {
     this.tickInterval = setInterval(() => {
-      this.tick().catch((err: unknown) =>
-        this.logger.error({ err }, 'Cron tick failed'),
-      );
+      this.tick().catch((err: unknown) => this.logger.error({ err }, 'Cron tick failed'));
     }, this.tickMs);
     this.logger.info({ tickMs: this.tickMs }, 'Cron scheduler started');
   }

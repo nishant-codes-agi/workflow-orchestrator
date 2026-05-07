@@ -9,7 +9,13 @@ interface LocalTimeParts {
 }
 
 const WEEKDAY_MAP: Record<string, number> = {
-  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
 };
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();
@@ -49,25 +55,11 @@ function toLocalParts(utcDate: Date, fmt: Intl.DateTimeFormat): LocalTimeParts {
   };
 }
 
-function matches(expr: CronExpression, local: LocalTimeParts): boolean {
-  return (
-    expr.minutes.has(local.minute) &&
-    expr.hours.has(local.hour) &&
-    expr.daysOfMonth.has(local.day) &&
-    expr.months.has(local.month) &&
-    expr.daysOfWeek.has(local.weekday)
-  );
-}
-
 const ONE_MINUTE = 60_000;
 const ONE_DAY = 24 * 60 * ONE_MINUTE;
 const MAX_ITERATIONS = 4 * 366 * 24 * 60;
 
-export function nextFire(
-  expr: CronExpression,
-  after: Date,
-  timezone: string,
-): Date {
+export function nextFire(expr: CronExpression, after: Date, timezone: string): Date {
   const fmt = getFormatter(timezone);
   let candidateMs = after.getTime() + ONE_MINUTE;
   candidateMs = candidateMs - (candidateMs % ONE_MINUTE);
@@ -78,13 +70,13 @@ export function nextFire(
 
     if (!expr.months.has(local.month)) {
       // Skip to start of next day - months won't match today
-      candidateMs += ONE_DAY - ((local.hour * 60 + local.minute) * ONE_MINUTE);
+      candidateMs += ONE_DAY - (local.hour * 60 + local.minute) * ONE_MINUTE;
       continue;
     }
 
     if (!expr.daysOfMonth.has(local.day) || !expr.daysOfWeek.has(local.weekday)) {
       // Skip to start of next day
-      candidateMs += ONE_DAY - ((local.hour * 60 + local.minute) * ONE_MINUTE);
+      candidateMs += ONE_DAY - (local.hour * 60 + local.minute) * ONE_MINUTE;
       continue;
     }
 

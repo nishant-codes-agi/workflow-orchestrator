@@ -16,7 +16,8 @@ export class ScheduleRepository {
        RETURNING id, next_fire_at`,
       [cronExpression, timezone, JSON.stringify(workflowDefinition), nextFireAt],
     );
-    const row = result.rows[0]!;
+    const row = result.rows[0];
+    if (!row) throw new Error('Failed to insert schedule');
     return { id: row.id, nextFireAt: row.next_fire_at };
   }
 
@@ -27,10 +28,7 @@ export class ScheduleRepository {
     return result.rows;
   }
 
-  async updateAfterFire(
-    scheduleId: string,
-    nextFireAt: Date,
-  ): Promise<void> {
+  async updateAfterFire(scheduleId: string, nextFireAt: Date): Promise<void> {
     await this.pool.query(
       `UPDATE schedules SET next_fire_at = $1, last_fired_at = NOW() WHERE id = $2`,
       [nextFireAt, scheduleId],

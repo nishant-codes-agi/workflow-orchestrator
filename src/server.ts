@@ -10,11 +10,7 @@ import { ScheduleRepository } from './repositories/schedule.repository.js';
 import { registerWorkflowRoutes } from './routes/workflow.routes.js';
 import { registerScheduleRoutes } from './routes/schedule.routes.js';
 
-export async function buildServer(
-  pool: DbPool,
-  config: Config,
-  handlerRegistry: HandlerRegistry,
-) {
+export async function buildServer(pool: DbPool, config: Config, handlerRegistry: HandlerRegistry) {
   const server = Fastify({
     logger: true,
   });

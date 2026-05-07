@@ -28,8 +28,10 @@ export class MinHeap<T> {
 
   extractMin(): T | undefined {
     if (this.heap.length === 0) return undefined;
-    const min = this.heap[0]!;
-    const last = this.heap.pop()!;
+    const min = this.heap[0];
+    if (min === undefined) return undefined;
+    const last = this.heap.pop();
+    if (last === undefined) return min;
     if (this.heap.length > 0) {
       this.heap[0] = last;
       this.siftDown(0);
@@ -48,8 +50,9 @@ export class MinHeap<T> {
   private siftUp(index: number): void {
     while (index > 0) {
       const parentIndex = Math.floor((index - 1) / 2);
-      const parent = this.heap[parentIndex]!;
-      const current = this.heap[index]!;
+      const parent = this.heap[parentIndex];
+      const current = this.heap[index];
+      if (parent === undefined || current === undefined) break;
       if (this.compare(current, parent) >= 0) break;
       this.heap[parentIndex] = current;
       this.heap[index] = parent;
@@ -64,17 +67,26 @@ export class MinHeap<T> {
       const left = 2 * index + 1;
       const right = 2 * index + 2;
 
-      if (left < length && this.compare(this.heap[left]!, this.heap[smallest]!) < 0) {
+      const smallestVal = this.heap[smallest];
+      const leftVal = this.heap[left];
+      const rightVal = this.heap[right];
+
+      if (smallestVal === undefined) break;
+      if (left < length && leftVal !== undefined && this.compare(leftVal, smallestVal) < 0) {
         smallest = left;
       }
-      if (right < length && this.compare(this.heap[right]!, this.heap[smallest]!) < 0) {
+      const newSmallestVal = this.heap[smallest];
+      if (newSmallestVal === undefined) break;
+      if (right < length && rightVal !== undefined && this.compare(rightVal, newSmallestVal) < 0) {
         smallest = right;
       }
 
       if (smallest === index) break;
 
-      const temp = this.heap[index]!;
-      this.heap[index] = this.heap[smallest]!;
+      const temp = this.heap[index];
+      const swapVal = this.heap[smallest];
+      if (temp === undefined || swapVal === undefined) break;
+      this.heap[index] = swapVal;
       this.heap[smallest] = temp;
       index = smallest;
     }

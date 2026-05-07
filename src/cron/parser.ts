@@ -54,9 +54,7 @@ function parseField(token: string, spec: FieldSpec): Set<number> {
         throw new Error(`Invalid range in ${spec.name} field: ${part}`);
       }
       if (start < spec.min || start > spec.max || end < spec.min || end > spec.max) {
-        throw new Error(
-          `Value out of range for ${spec.name} (${spec.min}-${spec.max}): ${part}`,
-        );
+        throw new Error(`Value out of range for ${spec.name} (${spec.min}-${spec.max}): ${part}`);
       }
       if (step <= 0) {
         throw new Error(`Invalid step value in ${spec.name} field: ${part}`);
@@ -69,9 +67,7 @@ function parseField(token: string, spec: FieldSpec): Set<number> {
         throw new Error(`Invalid value in ${spec.name} field: ${part}`);
       }
       if (val < spec.min || val > spec.max) {
-        throw new Error(
-          `Value out of range for ${spec.name} (${spec.min}-${spec.max}): ${val}`,
-        );
+        throw new Error(`Value out of range for ${spec.name} (${spec.min}-${spec.max}): ${val}`);
       }
       values.add(val);
     }
@@ -83,16 +79,29 @@ function parseField(token: string, spec: FieldSpec): Set<number> {
 export function parseCronExpression(expr: string): CronExpression {
   const fields = expr.trim().split(/\s+/);
   if (fields.length !== 5) {
-    throw new Error(
-      `Cron expression must have exactly 5 fields, got ${fields.length}: "${expr}"`,
-    );
+    throw new Error(`Cron expression must have exactly 5 fields, got ${fields.length}: "${expr}"`);
   }
 
+  const [minField, hourField, domField, monField, dowField] = fields as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const [minSpec, hourSpec, domSpec, monSpec, dowSpec] = FIELD_SPECS as unknown as [
+    FieldSpec,
+    FieldSpec,
+    FieldSpec,
+    FieldSpec,
+    FieldSpec,
+  ];
+
   return {
-    minutes: parseField(fields[0]!, FIELD_SPECS[0]!),
-    hours: parseField(fields[1]!, FIELD_SPECS[1]!),
-    daysOfMonth: parseField(fields[2]!, FIELD_SPECS[2]!),
-    months: parseField(fields[3]!, FIELD_SPECS[3]!),
-    daysOfWeek: parseField(fields[4]!, FIELD_SPECS[4]!),
+    minutes: parseField(minField, minSpec),
+    hours: parseField(hourField, hourSpec),
+    daysOfMonth: parseField(domField, domSpec),
+    months: parseField(monField, monSpec),
+    daysOfWeek: parseField(dowField, dowSpec),
   };
 }
