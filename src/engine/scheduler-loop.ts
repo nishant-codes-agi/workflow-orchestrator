@@ -93,9 +93,7 @@ export class SchedulerLoop {
       throw new Error('WorkerPool must be set before starting scheduler');
     }
     this.tickInterval = setInterval(() => {
-      this.tick().catch((err: unknown) =>
-        this.logger.error({ err }, 'Scheduler tick failed'),
-      );
+      this.tick().catch((err: unknown) => this.logger.error({ err }, 'Scheduler tick failed'));
     }, this.tickMs);
     this.logger.info({ tickMs: this.tickMs }, 'Scheduler loop started');
   }

@@ -4,15 +4,14 @@ import type { Workflow, WorkflowStatus } from '../interfaces/workflow.js';
 export class WorkflowRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async insertWorkflow(
-    client: pg.PoolClient,
-    status: WorkflowStatus,
-  ): Promise<string> {
+  async insertWorkflow(client: pg.PoolClient, status: WorkflowStatus): Promise<string> {
     const result = await client.query<{ id: string }>(
       `INSERT INTO workflows (status) VALUES ($1) RETURNING id`,
       [status],
     );
-    return result.rows[0]!.id;
+    const row = result.rows[0];
+    if (!row) throw new Error('Failed to insert workflow');
+    return row.id;
   }
 
   async findById(workflowId: string): Promise<Workflow | null> {
@@ -28,10 +27,10 @@ export class WorkflowRepository {
     workflowId: string,
     status: WorkflowStatus,
   ): Promise<void> {
-    await client.query(
-      `UPDATE workflows SET status = $1, updated_at = NOW() WHERE id = $2`,
-      [status, workflowId],
-    );
+    await client.query(`UPDATE workflows SET status = $1, updated_at = NOW() WHERE id = $2`, [
+      status,
+      workflowId,
+    ]);
   }
 
   async getStatus(workflowId: string): Promise<WorkflowStatus | null> {

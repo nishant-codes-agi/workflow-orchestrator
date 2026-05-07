@@ -18,10 +18,7 @@ export class Reaper {
   ) {}
 
   async reclaimStaleTasks(): Promise<number> {
-    const reclaimed = await this.taskRepo.reclaimStaleTasks(
-      this.db,
-      this.config.leaseTimeoutMs,
-    );
+    const reclaimed = await this.taskRepo.reclaimStaleTasks(this.db, this.config.leaseTimeoutMs);
 
     for (const task of reclaimed) {
       if (task.status === 'PENDING' && new Date(task.scheduled_at).getTime() <= Date.now()) {
@@ -46,16 +43,16 @@ export class Reaper {
   }
 
   private async checkWorkflowCompletion(workflowId: string): Promise<void> {
-    const nonTerminalCount = await this.taskRepo.countNonTerminalTasks(
-      this.db,
-      workflowId,
-    );
+    const nonTerminalCount = await this.taskRepo.countNonTerminalTasks(this.db, workflowId);
 
     if (nonTerminalCount === 0) {
       const hasFailed = await this.taskRepo.hasFailedTasks(this.db, workflowId);
       const finalStatus = hasFailed ? 'FAILED' : 'COMPLETED';
       await this.workflowRepo.updateStatus(this.db, workflowId, finalStatus);
-      this.logger.info({ workflowId, status: finalStatus }, 'Workflow reached terminal state (reaper)');
+      this.logger.info(
+        { workflowId, status: finalStatus },
+        'Workflow reached terminal state (reaper)',
+      );
     }
   }
 

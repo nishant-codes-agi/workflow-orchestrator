@@ -50,12 +50,7 @@ async function main() {
     handlerRegistry,
   );
 
-  const schedulerLoop = new SchedulerLoop(
-    pool,
-    taskRepo,
-    server.log,
-    100,
-  );
+  const schedulerLoop = new SchedulerLoop(pool, taskRepo, server.log, 100);
 
   const taskCompleter = new TaskCompleter(
     pool,

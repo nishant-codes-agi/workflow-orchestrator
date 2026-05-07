@@ -68,7 +68,9 @@ export class WorkerPool {
       const heartbeat = setInterval(() => {
         this.taskRepo
           .updateHeartbeat(this.db, task.id)
-          .catch((err: unknown) => this.logger.error({ err, taskId: task.id }, 'Heartbeat update failed'));
+          .catch((err: unknown) =>
+            this.logger.error({ err, taskId: task.id }, 'Heartbeat update failed'),
+          );
       }, this.config.heartbeatIntervalMs);
 
       const ac = new AbortController();
@@ -90,9 +92,7 @@ export class WorkerPool {
             attempt: cas.attempts,
           }),
           new Promise<never>((_, reject) => {
-            ac.signal.addEventListener('abort', () =>
-              reject(new Error('timeout')),
-            );
+            ac.signal.addEventListener('abort', () => reject(new Error('timeout')));
           }),
         ]);
         outcome = 'completed';

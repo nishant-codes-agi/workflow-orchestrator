@@ -47,7 +47,9 @@ export class TaskRepository {
           task.pending_deps,
         ],
       );
-      logicalToId.set(task.logical_id, result.rows[0]!.id);
+      const row = result.rows[0];
+      if (!row) throw new Error(`Failed to insert task: ${task.logical_id}`);
+      logicalToId.set(task.logical_id, row.id);
     }
 
     return logicalToId;
@@ -65,10 +67,7 @@ export class TaskRepository {
     }
   }
 
-  async markReadyTasks(
-    client: pg.PoolClient,
-    workflowId: string,
-  ): Promise<void> {
+  async markReadyTasks(client: pg.PoolClient, workflowId: string): Promise<void> {
     await client.query(
       `UPDATE tasks SET status = 'READY', scheduled_at = NOW()
        WHERE pending_deps = 0 AND workflow_id = $1 AND status = 'PENDING'`,
@@ -101,10 +100,7 @@ export class TaskRepository {
     return result.rows;
   }
 
-  async claimTask(
-    pool: pg.Pool,
-    taskId: string,
-  ): Promise<{ rowCount: number; attempts: number }> {
+  async claimTask(pool: pg.Pool, taskId: string): Promise<{ rowCount: number; attempts: number }> {
     const result = await pool.query<{ attempts: number }>(
       `UPDATE tasks SET status = 'RUNNING', attempts = attempts + 1,
        last_heartbeat_at = NOW()
@@ -119,35 +115,23 @@ export class TaskRepository {
   }
 
   async updateHeartbeat(pool: pg.Pool, taskId: string): Promise<void> {
-    await pool.query(
-      `UPDATE tasks SET last_heartbeat_at = NOW() WHERE id = $1`,
-      [taskId],
-    );
+    await pool.query(`UPDATE tasks SET last_heartbeat_at = NOW() WHERE id = $1`, [taskId]);
   }
 
   async markCompleted(pool: pg.Pool, taskId: string): Promise<void> {
-    await pool.query(
-      `UPDATE tasks SET status = 'COMPLETED', completed_at = NOW() WHERE id = $1`,
-      [taskId],
-    );
+    await pool.query(`UPDATE tasks SET status = 'COMPLETED', completed_at = NOW() WHERE id = $1`, [
+      taskId,
+    ]);
   }
 
-  async markFailed(
-    pool: pg.Pool,
-    taskId: string,
-    error: string,
-  ): Promise<void> {
+  async markFailed(pool: pg.Pool, taskId: string, error: string): Promise<void> {
     await pool.query(
       `UPDATE tasks SET status = 'FAILED', error = $2, completed_at = NOW() WHERE id = $1`,
       [taskId, error],
     );
   }
 
-  async scheduleRetry(
-    pool: pg.Pool,
-    taskId: string,
-    sleepMs: number,
-  ): Promise<void> {
+  async scheduleRetry(pool: pg.Pool, taskId: string, sleepMs: number): Promise<void> {
     await pool.query(
       `UPDATE tasks SET status = 'PENDING',
        scheduled_at = NOW() + ($2::int * interval '1 millisecond'),
@@ -157,10 +141,7 @@ export class TaskRepository {
     );
   }
 
-  async getChildTaskIds(
-    pool: pg.Pool,
-    completedTaskId: string,
-  ): Promise<string[]> {
+  async getChildTaskIds(pool: pg.Pool, completedTaskId: string): Promise<string[]> {
     const result = await pool.query<{ task_id: string }>(
       `SELECT task_id FROM task_dependencies WHERE depends_on_task_id = $1`,
       [completedTaskId],
@@ -194,38 +175,36 @@ export class TaskRepository {
   }
 
   async markTaskReady(pool: pg.Pool, taskId: string): Promise<void> {
-    await pool.query(
-      `UPDATE tasks SET status = 'READY', scheduled_at = NOW() WHERE id = $1`,
-      [taskId],
-    );
+    await pool.query(`UPDATE tasks SET status = 'READY', scheduled_at = NOW() WHERE id = $1`, [
+      taskId,
+    ]);
   }
 
-  async countNonTerminalTasks(
-    pool: pg.Pool,
-    workflowId: string,
-  ): Promise<number> {
+  async countNonTerminalTasks(pool: pg.Pool, workflowId: string): Promise<number> {
     const result = await pool.query<{ count: string }>(
       `SELECT COUNT(*) FILTER (WHERE status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')) as count
        FROM tasks WHERE workflow_id = $1`,
       [workflowId],
     );
-    return parseInt(result.rows[0]!.count, 10);
+    return parseInt(result.rows[0]?.count ?? '0', 10);
   }
 
   async reclaimStaleTasks(
     pool: pg.Pool,
     leaseTimeoutMs: number,
-  ): Promise<Array<{
-    id: string;
-    workflow_id: string;
-    status: string;
-    pending_deps: number;
-    priority: number;
-    scheduled_at: Date;
-    submission_order: bigint;
-    max_attempts: number;
-    attempts: number;
-  }>> {
+  ): Promise<
+    Array<{
+      id: string;
+      workflow_id: string;
+      status: string;
+      pending_deps: number;
+      priority: number;
+      scheduled_at: Date;
+      submission_order: bigint;
+      max_attempts: number;
+      attempts: number;
+    }>
+  > {
     const result = await pool.query<{
       id: string;
       workflow_id: string;
@@ -281,13 +260,10 @@ export class TaskRepository {
        WHERE workflow_id = $1 AND status = 'FAILED'`,
       [workflowId],
     );
-    return parseInt(result.rows[0]!.count, 10) > 0;
+    return parseInt(result.rows[0]?.count ?? '0', 10) > 0;
   }
 
-  async cancelNonStartedTasks(
-    pool: pg.Pool,
-    workflowId: string,
-  ): Promise<number> {
+  async cancelNonStartedTasks(pool: pg.Pool, workflowId: string): Promise<number> {
     const result = await pool.query(
       `UPDATE tasks SET status = 'CANCELLED', completed_at = NOW()
        WHERE workflow_id = $1 AND status IN ('PENDING', 'READY')`,
@@ -297,17 +273,12 @@ export class TaskRepository {
   }
 
   async markTaskCancelled(pool: pg.Pool, taskId: string): Promise<void> {
-    await pool.query(
-      `UPDATE tasks SET status = 'CANCELLED', completed_at = NOW() WHERE id = $1`,
-      [taskId],
-    );
+    await pool.query(`UPDATE tasks SET status = 'CANCELLED', completed_at = NOW() WHERE id = $1`, [
+      taskId,
+    ]);
   }
 
-  async cancelDependentsOfTask(
-    pool: pg.Pool,
-    workflowId: string,
-    taskId: string,
-  ): Promise<void> {
+  async cancelDependentsOfTask(pool: pg.Pool, workflowId: string, taskId: string): Promise<void> {
     const childIds = await this.getChildTaskIds(pool, taskId);
     for (const childId of childIds) {
       await pool.query(

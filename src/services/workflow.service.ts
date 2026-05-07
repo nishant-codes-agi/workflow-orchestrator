@@ -16,9 +16,7 @@ export class WorkflowService {
     private readonly logger: FastifyBaseLogger,
   ) {}
 
-  async submitWorkflow(
-    definition: WorkflowDefinition,
-  ): Promise<{ workflowId: string }> {
+  async submitWorkflow(definition: WorkflowDefinition): Promise<{ workflowId: string }> {
     const { tasks } = definition;
 
     if (!tasks || tasks.length === 0) {
@@ -35,10 +33,7 @@ export class WorkflowService {
 
     for (const task of tasks) {
       if (!this.handlerRegistry.has(task.handler)) {
-        throw new SubmissionError(
-          `Unknown handler: ${task.handler}`,
-          422,
-        );
+        throw new SubmissionError(`Unknown handler: ${task.handler}`, 422);
       }
     }
 
@@ -49,10 +44,7 @@ export class WorkflowService {
 
     const cycle = detectCycle(adjacency);
     if (cycle) {
-      throw new SubmissionError(
-        `Cycle detected: ${cycle.join(' -> ')}`,
-        422,
-      );
+      throw new SubmissionError(`Cycle detected: ${cycle.join(' -> ')}`, 422);
     }
 
     const pendingDepsMap = new Map<string, number>();
@@ -64,10 +56,7 @@ export class WorkflowService {
     try {
       await client.query('BEGIN');
 
-      const workflowId = await this.workflowRepo.insertWorkflow(
-        client,
-        'RUNNING',
-      );
+      const workflowId = await this.workflowRepo.insertWorkflow(client, 'RUNNING');
 
       const bulkRows: BulkTaskRow[] = tasks.map((t: TaskDefinition) => ({
         logical_id: t.id,
@@ -83,17 +72,14 @@ export class WorkflowService {
         pending_deps: pendingDepsMap.get(t.id) ?? 0,
       }));
 
-      const logicalToId = await this.taskRepo.bulkInsertTasks(
-        client,
-        workflowId,
-        bulkRows,
-      );
+      const logicalToId = await this.taskRepo.bulkInsertTasks(client, workflowId, bulkRows);
 
       const deps: Array<{ taskId: string; dependsOnTaskId: string }> = [];
       for (const task of tasks) {
         for (const depLogicalId of task.dependsOn ?? []) {
-          const taskId = logicalToId.get(task.id)!;
-          const dependsOnTaskId = logicalToId.get(depLogicalId)!;
+          const taskId = logicalToId.get(task.id);
+          const dependsOnTaskId = logicalToId.get(depLogicalId);
+          if (!taskId || !dependsOnTaskId) continue;
           deps.push({ taskId, dependsOnTaskId });
         }
       }

@@ -46,15 +46,17 @@ export class TaskCompleter {
       );
       await this.taskRepo.scheduleRetry(this.db, task.id, sleep);
       this.logger.info(
-        { taskId: task.id, attempts: task.attempts, maxAttempts: task.max_attempts, nextSleepMs: sleep },
+        {
+          taskId: task.id,
+          attempts: task.attempts,
+          maxAttempts: task.max_attempts,
+          nextSleepMs: sleep,
+        },
         'Task scheduled for retry',
       );
     } else {
       await this.taskRepo.markFailed(this.db, task.id, error ?? 'unknown');
-      this.logger.info(
-        { taskId: task.id, attempts: task.attempts },
-        'Task failed terminally',
-      );
+      this.logger.info({ taskId: task.id, attempts: task.attempts }, 'Task failed terminally');
 
       if (wfStatus === 'CANCELLING') {
         await this.cancelDependents(task.id, task.workflow_id);
@@ -91,10 +93,7 @@ export class TaskCompleter {
   }
 
   private async checkWorkflowCompletion(workflowId: string): Promise<void> {
-    const nonTerminalCount = await this.taskRepo.countNonTerminalTasks(
-      this.db,
-      workflowId,
-    );
+    const nonTerminalCount = await this.taskRepo.countNonTerminalTasks(this.db, workflowId);
 
     if (nonTerminalCount === 0) {
       const wfStatus = await this.workflowRepo.getStatus(workflowId);
